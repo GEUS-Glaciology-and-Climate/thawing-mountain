@@ -1,6 +1,12 @@
+old
 data/Marco
 data/Michele
 data/doc
+data/S2
+*.avi
+*.nc
+*.tif
+
 
 
 # Byte-compiled / optimized / DLL files
