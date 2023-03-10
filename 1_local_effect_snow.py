@@ -16,7 +16,7 @@ from textwrap import wrap
 
 
 plt.close('all')
-notes = pd.read_csv('data/time lapse/notes.txt', skipinitialspace=True)
+notes = pd.read_csv('data/Michele/time lapse/notes.txt', skipinitialspace=True)
 notes['time'] = pd.to_datetime(notes.time)
 notes = notes.set_index(['site', 'time']).sort_index()
 df_gst = pd.read_csv('data/GST_data.csv', skipinitialspace=True)

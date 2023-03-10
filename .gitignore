@@ -7,7 +7,7 @@ data/S2
 *.nc
 *.tif
 
-
+GEE
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
