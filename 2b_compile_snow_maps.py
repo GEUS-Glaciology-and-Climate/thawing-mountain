@@ -91,6 +91,8 @@ with warnings.catch_warnings():
             
         for year in range(2016,2023):
             print(year)
+# %% 
+
             list_files = os.listdir(dir_name)
             list_files = [f for f in list_files if f.endswith('.tif')]
             list_files = [f for f in list_files if f[15:19] == str(year)]
