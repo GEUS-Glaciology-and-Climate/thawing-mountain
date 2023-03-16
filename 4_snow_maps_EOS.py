@@ -41,12 +41,13 @@ for area in df_fa.name[2:3]:
     print('===',area,'===')
     print('opening dataset')
     ds_sm = xr.open_mfdataset(['data/S2/snowmap_'+area+'_'+str(y)+'.nc' \
-                               for y in range(2016, 2023) \
+                               for y in range(2017, 2023) \
                                if 'snowmap_'+area+'_'+str(y)+'.nc' in os.listdir('data/S2')])
     ds_sm = ds_sm.where(ds_sm.elevation>0).drop('elevation')
     ds_sm = ds_sm.where((ds_sm.NDSI+ds_sm.B04)!=0)
     ds_sm['snow'] = ds_sm.snow.where(ds_sm.snow <= 100).where(ds_sm.snow >= 0)
     tmp = ds_sm.snow.copy()
+    del ds_sm
     # post processing (filling gaps with bbfill, ffill and climatology)
 
     print('> filling with ffill and bfill')   
@@ -57,11 +58,11 @@ for area in df_fa.name[2:3]:
         # filling the gaps in the first image of the year (assuming snow)
         time_first = tmp.sel(time=str(year)).time[0]
         tmp.loc[{'time': time_first}] = \
-            tmp.sel(time=time_first).fillna(100).where(msk).values
+            tmp.sel(time=time_first).fillna(100).where(msk)
         # filling the gaps in the last image of the year (assuming snow)
         time_last = tmp.sel(time=str(year)).time[-1]
         tmp.loc[{'time': time_last}] = \
-            tmp.sel(time=time_last).fillna(100).where(msk).values
+            tmp.sel(time=time_last).fillna(100).where(msk)
 
         tmp_y = tmp.sel(time=str(year)).copy()
 

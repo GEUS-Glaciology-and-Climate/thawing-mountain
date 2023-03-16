@@ -38,36 +38,51 @@ def make_video(image_folder, video_name):
 plt.close('all')
 
 df_fa = gpd.read_file('data/GIS/FocusAreas.shp')
-df = pd.read_csv('data/coordinates_all.csv', sep=';').set_index('ID')
-# plt.close('all')
-# notes = pd.read_csv('data/time lapse/notes.txt', skipinitialspace=True)
-# notes['time'] = pd.to_datetime(notes.time)
-# notes = notes.set_index(['site', 'time']).sort_index()
 
-df_gst = pd.read_csv('data/GST_data.csv', skipinitialspace=True)
-df_gst['time'] = pd.to_datetime(df_gst.time)
-df_gst['site'] = df_gst.site.astype(str)
-df_gst = df_gst.set_index(['site', 'time']).sort_index()
 
-for area in df_fa.name[-1:]:
-    
+for area in df_fa.name[2:3]:
     print('===',area,'===')
-    # #%%
-    # area = 'Vaigat'
-    # y = 2021
     print('opening dataset')
     ds_sm = xr.open_mfdataset(['data/S2/snowmap_'+area+'_'+str(y)+'.nc' \
-                               for y in range(2016, 2023) \
-                               if 'snowmap_'+area+'_'+str(y)+'.nc' in os.listdir('data/S2')]
-                              ).snow
-        
+                               for y in range(2017, 2023) \
+                               if 'snowmap_'+area+'_'+str(y)+'.nc' in os.listdir('data/S2')])
+    ds_sm = ds_sm.where(ds_sm.elevation>0).drop('elevation')
+    ds_sm = ds_sm.where((ds_sm.NDSI+ds_sm.B04)!=0)
+    ds_sm['snow'] = ds_sm.snow.where(ds_sm.snow <= 100).where(ds_sm.snow >= 0)
+    tmp = ds_sm.snow.copy()
+    del ds_sm
     # post processing (filling gaps with bbfill, ffill and climatology)
-    # ds_sm = ds_sm.rio.write_crs("EPSG:3413")
-    # ds_sm = ds_sm.rio.reproject("EPSG:4326", nodata=-999)
-    print('> filling with ffill and bfill')
-    tmp = ds_sm.where(ds_sm <= 100)
-    tmp = tmp.where(tmp >= 0)
-    tmp = tmp.resample(time='D').mean()
+
+    print('> filling with ffill and bfill')   
+    # pixels for which there is at least one good value
+    msk = tmp.notnull().any(dim='time').copy()
+    
+    for year in np.unique(tmp.time.dt.year):
+        # filling the gaps in the first image of the year (assuming snow)
+        time_first = tmp.sel(time=str(year)).time[0]
+        tmp.loc[{'time': time_first}] = \
+            tmp.sel(time=time_first).fillna(100).where(msk)
+        # filling the gaps in the last image of the year (assuming snow)
+        time_last = tmp.sel(time=str(year)).time[-1]
+        tmp.loc[{'time': time_last}] = \
+            tmp.sel(time=time_last).fillna(100).where(msk)
+
+        tmp_y = tmp.sel(time=str(year)).copy()
+
+        # then creating a replicate of the first image with time stamp yyyy-01-01
+        init = tmp_y.isel(time=[0, 0]).copy()
+        init['time']=[pd.to_datetime(str(year)+'-01-01'), time_first.values]
+        init = init.resample(time='D').nearest()
+        # then creating a replicate of the first image with time stamp yyyy-12-31
+        finit = tmp_y.isel(time=[-1, -1]).copy()
+        finit['time']=[time_last.values, pd.to_datetime(str(year)+'-12-31')]
+        finit = finit.resample(time='D').nearest()
+        
+        print('Adding',init.time[0].values,finit.time[-1].values)
+        tmp = xr.concat((init,finit,tmp),dim='time')
+    del tmp_y, init, finit
+    tmp = tmp.sortby('time')
+    tmp = tmp.resample(time='D').asfreq()
     ds_sm_filled = tmp.ffill('time')
     ds_sm_b = tmp.bfill('time')
     ds_sm_filled = ds_sm_filled.where(ds_sm_filled==ds_sm_b)
@@ -76,12 +91,15 @@ for area in df_fa.name[-1:]:
     ds_sm_clim = ds_sm_filled.groupby('doy').mean(skipna=True)
     ds_sm_clim_ext = ds_sm_clim.sel(doy = ds_sm_filled['doy'] )
     ds_sm_filled = ds_sm_filled.fillna(ds_sm_clim_ext)
-    
-    print('loading climatology')
+    print('loading data')
     ds_sm_clim = ds_sm_clim.load()
     
     # %% Generating maps
     def plotting_all_maps(ds_sm_clim, folder):
+        try:
+            os.mkdir(folder)
+        except:
+            pass
         [os.remove(folder+f) for f in os.listdir(folder)]
         time_dim = list(ds_sm_clim.dims)
         time_dim.remove('x')
@@ -107,17 +125,9 @@ for area in df_fa.name[-1:]:
             plt.close(fig)
             print(doy.values,' /', len(ds_sm_clim[time_dim]))
     print('plotting climatology')
-    try:
-        os.mkdir('plots/'+area+'/')
-        os.mkdir('out/videos/')
-    except:
-        pass
-    plotting_all_maps(ds_sm_clim, folder='plots/'+area+'/')
+
+    plotting_all_maps(ds_sm_clim, folder='plots/Climatology/'+area+'/')
     print('making video')
-    make_video('plots/'+area+'/', 'out/videos/'+area+'_climatology.avi')
     
-    # print('plotting gap-filled maps')
-    # plotting_all_maps(ds_sm_filled, folder='plots/'+area+'/')
-    # print('making video')
-    # make_video('plots/'+area+'/', area+'_gap-filled.avi')
-    
+    make_video('plots/climatology videos/'+area+'_climatology.avi')
+
