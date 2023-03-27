@@ -7,14 +7,14 @@ CRS: EPSG 4326
 Cloud masking: S2cloudless (Zupanc et al., 2017; Skakun et al. 2022) 
 Snow detection: Adapted Let-It-Snow algorithm from (Gascoin et al., 2019) based on NDSI and B04
 Data query and download: SentinelHub
-<<<<<<<<<<
+
 Gap-free snow map, climatology and snow end/start day construction: 
 The cloud masks scenes from 2017 to 2022 are downloaded and binary snow cover (BSC) is derived. Since in the following, climatological snow cover will be derived, we convert the BSC maps into Snow Cover Probability (SCP) maps (0 or 100% SCP at this point). The temporally sparse SCP data is then interpolated to daily resolution. Each winter, the days between one year's last S2 observation and the following year's first observation is filled with SCP=100. Then for each of the remaining gap, we run separately a forward filling (SCP_ff) and a backward filling (SCP_bf). If SCP_ff == SCP_bf, meaning that the SCP values on each side of the gap agree, then we fill the gap with that value. The remaining gaps, over which SCP are seen to change, will be gap-filled from the climatological SCP values. For each day of the year, we make the average of all available SCP observations. The result is a a  6 year SCP climatology SCP_clim. Eventually, the gaps that was left in the SCP dataset can be filled with the correponding value for that day of the year in SCP_clim.
 
 From SCP_clim, we then  define the Snow End Day (SED) and Snow Onset Day (SOD) as the first and last day of the year when the SCP_clim is below 65%.
 
 Limitations:
-- S2 has 5 days revisit
+- S2 has 1-5 days revisit
 - No observation under clouds and in polar night
 - Consequently, uneasy to detect snow-free pixels in the winter
 - The early/late "spikes" in snow melt day and snow onset day is currently note handle. We only look at first and last snow-free day in the climatology.

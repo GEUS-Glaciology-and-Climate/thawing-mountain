@@ -134,11 +134,11 @@ function evaluatePixel(samples, inputData, inputMetadata, customData, outputMeta
 import geopandas as gpd
 df_fa = gpd.read_file('data/GIS/FocusAreas.shp')
 resolution = 20
-for year in range(2017,2019):
+for year in range(2017,2023):
     time_interval = str(year)+"-01-01", str(year+1)+"-01-01"
     
-    for k in df_fa.index[5:6]:
-        dir_name= 'data/S2/'+str(k+1) + '_' + df_fa.loc[k,'name']
+    for k in df_fa.index[-1:]:
+        dir_name= 'C:/Data_save/S2/'+str(k+1) + '_' + df_fa.loc[k,'name']
         try:
             os.mkdir(dir_name)
         except:

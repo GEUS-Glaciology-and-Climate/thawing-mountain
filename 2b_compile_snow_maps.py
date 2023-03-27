@@ -69,14 +69,8 @@ df_fa.index = df_fa.index + 1
 gdal.UseExceptions()
 with warnings.catch_warnings():
     warnings.filterwarnings('ignore', r'All-NaN (slice|axis) encountered')   
-    
-    
-    for k in df_fa.index[-1:]:
-        dir_name= 'data/S2/'+str(k) + '_' + df_fa.loc[k,'name']
-        try:
-            os.mkdir(dir_name)
-        except:
-            pass
+    for k in df_fa.index:
+        dir_name= 'C:/Data_save/S2/'+str(k) + '_' + df_fa.loc[k,'name']
         print(' ')
         print(dir_name)
         
@@ -85,14 +79,12 @@ with warnings.catch_warnings():
                                           [[[np.round(x,4), np.round(y,4)] \
                                             for (x,y) in df_fa.loc[k,'geometry'].exterior.coords]]},
                             crs=CRS.WGS84)
-        betsiboka_coords_wgs84 = [np.round(x,4) for x in df_fa.loc[k,'geometry'].bounds]
-        betsiboka_bbox = BBox(bbox=betsiboka_coords_wgs84, crs=CRS.WGS84)
-        betsiboka_size = bbox_to_dimensions(betsiboka_bbox, resolution=resolution)
+        ROI_coords_wgs84 = [np.round(x,4) for x in df_fa.loc[k,'geometry'].bounds]
+        ROI_bbox = BBox(bbox=ROI_coords_wgs84, crs=CRS.WGS84)
+        ROI_size = bbox_to_dimensions(ROI_bbox, resolution=resolution)
             
         for year in range(2016,2023):
             print(year)
-# %% 
-
             list_files = os.listdir(dir_name)
             list_files = [f for f in list_files if f.endswith('.tif')]
             list_files = [f for f in list_files if f[15:19] == str(year)]
@@ -111,10 +103,12 @@ with warnings.catch_warnings():
             print('preparing data')
             snow_map['time'] = [pd.to_datetime(f.split('_')[3]) for f in list_files]
             snow_map=snow_map.band_data.to_dataset('band').rename(col_name)
-            snow_map['elevation'] = snow_map.elevation - 12000
-            snow_map['NDSI'] = snow_map['NDSI'].where(snow_map.elevation.isel(time=0)>0)
-            snow_map['B04'] = snow_map['B04'].where(snow_map.elevation.isel(time=0)>0)
-            snow_map['elevation'] = snow_map['elevation'].where(snow_map.elevation.isel(time=0)>0)
+            tmp = snow_map.elevation.isel(time=slice(0,10))
+            tmp = tmp.where(tmp>0)
+            snow_map['elevation'] = tmp.mean('time') - 12000
+            snow_map['NDSI'] = snow_map['NDSI'].where(snow_map.elevation>0)
+            snow_map['B04'] = snow_map['B04'].where(snow_map.elevation>0)
+            snow_map['elevation'] = snow_map['elevation'].where(snow_map.elevation>0)
 
             snow_map = snow_map.drop_duplicates('time')
             mask = snow_map['NDSI'].notnull().any(('x','y'))
@@ -126,12 +120,12 @@ with warnings.catch_warnings():
 
             snow_map['snow'] = xr.zeros_like(snow_map.B04)
             snow_map['snow'] = xr.where(snow_map.B04.isnull(), 254, snow_map['snow'])       
-            
+            snow_map=snow_map.load()
             print('first pass')
             msk = (snow_map.NDSI > n1) & (snow_map.B04 > r1)
             snow_map['snow'] = xr.where(msk, 100, snow_map.snow)
             
-            zs = snow_map.elevation.copy()*np.nan
+            zs = snow_map.NDSI.copy()*np.nan
 
             for time in snow_map.time:
                 snow_map_d = snow_map.sel(time=time).copy()
@@ -156,7 +150,6 @@ with warnings.catch_warnings():
             snow_map['snow'] = snow_map.snow.astype(np.int8)
             snow_map = snow_map.drop('CLM')
             snow_map = snow_map.drop(3)
-            snow_map['elevation'] = snow_map['elevation'].isel(time=0)
 
             # # plotting
             # if plotting:
@@ -208,4 +201,137 @@ with warnings.catch_warnings():
             
             snow_map = snow_map.rio.write_crs("EPSG:4326")
             print('printing file')
-            snow_map.sortby('time').to_netcdf('data/S2/snowmap_' + df_fa.loc[k,'name']+'_'+ str(year) + '.nc')
+            snow_map = snow_map.where(snow_map.elevation>=0)
+            snow_map = snow_map.drop('elevation')
+            snow_map = snow_map.sortby('time')
+            comp = dict(zlib=True, complevel=5)
+            encoding = {var: comp for var in snow_map.data_vars}
+            snow_map.to_netcdf('out/S2 snow maps/snowmap_' + df_fa.loc[k,'name']+'_'+ str(year) + '.nc',
+                                              encoding=encoding)
+del snow_map
+# %%
+
+import matplotlib.colors as cm
+c = cm.Colormap('Spectral')
+c.set_under('magenta')
+import xarray as xr
+import rioxarray
+import os
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib import cm
+import numpy as np
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+import geopandas as gpd
+import cv2
+import os
+    
+plt.close('all')
+
+df_fa = gpd.read_file('data/GIS/FocusAreas.shp')
+for area in df_fa.name:
+    print('===',area,'===')
+    for y in range(2017, 2023):
+        print(y)
+        print('opening dataset')
+        if 'snowmap_'+area+'_'+str(y)+'.nc' not in os.listdir('out/S2 snow maps/'):
+            print('No data found for ',y)
+            continue
+        ds_sm = xr.open_dataset('out/S2 snow maps/snowmap_'+area+'_'+str(y)+'.nc').load()
+        ds_sm = ds_sm.where((ds_sm.NDSI+ds_sm.B04)!=0)
+        ds_sm['snow'] = ds_sm.snow.where(ds_sm.snow <= 100).where(ds_sm.snow >= 0)
+        tmp = ds_sm.snow.copy()
+        del ds_sm
+        # post processing (filling gaps with bbfill, ffill and climatology)
+    
+        print('> filling with ffill and bfill')   
+        # pixels for which there is at least one good value
+        msk = tmp.notnull().any(dim='time').copy()
+        
+        # filling the gaps in the first image of the year (assuming snow)
+        time_first = tmp.sel(time=str(y)).time[0]
+        tmp.loc[{'time': time_first}] = tmp.sel(time=time_first).fillna(100).where(msk)
+        # filling the gaps in the last image of the y (assuming snow)
+        time_last = tmp.sel(time=str(y)).time[-1]
+        tmp.loc[{'time': time_last}] = tmp.sel(time=time_last).fillna(100).where(msk)
+
+        # then creating a replicate of the first image with time stamp yyyy-01-01
+        init = tmp.isel(time=[0, 0]).copy()
+        init['time']=[pd.to_datetime(str(y)+'-01-01'), time_first.values]
+        init = init.resample(time='D').nearest()
+        # then creating a replicate of the first image with time stamp yyyy-12-31
+        finit = tmp.isel(time=[-1, -1]).copy()
+        finit['time']=[time_last.values, pd.to_datetime(str(y)+'-12-31')]
+        finit = finit.resample(time='D').nearest()
+        
+        print('Adding',init.time[0].values,finit.time[-1].values)
+        tmp = xr.concat((init,finit,tmp),dim='time')
+        del init, finit
+        tmp = tmp.sortby('time')
+        tmp = tmp.resample(time='D').asfreq()
+        ds_sm_filled = tmp.ffill('time')
+        ds_sm_b = tmp.bfill('time')
+        ds_sm_filled = ds_sm_filled.where(ds_sm_filled==ds_sm_b)     
+        print('Saving gap-filled file')
+        ds_sm_filled.to_netcdf('out/S2 snow maps/snowmap_' + area+'_'+ str(y) + '_fbfill.nc',
+                                          encoding={'snow': dict(zlib=True, complevel=5)})
+del tmp
+# %%
+print ('Building climatology')
+df_fa = gpd.read_file('data/GIS/FocusAreas.shp')
+
+for area in df_fa.name:
+    print('===',area,'===')
+    ds_sm_filled = xr.open_mfdataset(['out/S2 snow maps/snowmap_'+area+'_'+str(y)+'_fbfill.nc' \
+                               for y in range(2017, 2023) \
+                               if 'snowmap_'+area+'_'+str(y)+'_fbfill.nc' in os.listdir('out/S2 snow maps')])
+        
+    print('> filling with climatology')
+    ds_sm_filled['doy'] = ds_sm_filled.time.dt.dayofyear
+    ds_sm_clim = ds_sm_filled.groupby('doy').mean(skipna=True)
+    del ds_sm_filled
+    # ds_sm_clim_ext = ds_sm_clim.sel(doy = ds_sm_filled['doy'] )
+    # ds_sm_filled = ds_sm_filled.fillna(ds_sm_clim_ext)
+    # ds_sm_filled['doy'] = ds_sm_filled.time.dt.dayofyear
+    print('Computing climatology')
+    ds_sm_clim = ds_sm_clim.snow.load()
+
+    # ds_sm_filled.to_netcdf('out/snowmap_'+area+'_'+'_filled.nc')
+    # ds_sm_clim.to_netcdf('out/snowmap_'+area+'_'+'_clim.nc')
+    
+    print('Snow onset and end day from climatology')
+    thr= 65
+    bare_area = xr.where(ds_sm_clim>thr, 0,1)
+    bare_area =bare_area.where(ds_sm_clim.notnull())    
+    SED = bare_area.idxmax(dim='doy')
+    SED = SED.where(ds_sm_clim.notnull().any(dim='doy'))
+    SED = SED.rename('SED')
+    bare_area2 =bare_area.copy()
+    bare_area2['doy'] = 365-bare_area2.doy
+    bare_area2 = bare_area2.sortby('doy')
+    SOD = 365 - bare_area2.idxmax(dim='doy')
+    SOD = SOD.where(ds_sm_clim.notnull().any(dim='doy'))
+    SOD = SOD.rename('SOD')
+    plt.close('all')
+
+    x = int(len(bare_area.x)*0.345)
+    y = int(len(bare_area.y)*0.2)
+    plt.figure()
+    ds_sm_clim.isel(x=x,y=y).plot(marker='o')
+    plt.plot(SED.isel(x=x,y=y),1,marker='o',markersize=10)
+    plt.plot(SOD.isel(x=x,y=y),1,marker='o',markersize=10)
+      
+    plt.figure()
+    h = SED.plot(vmin=1)
+    plt.plot(bare_area.isel(x=x,y=y).x,bare_area.isel(x=x,y=y).y, 'r',marker='o')
+    cmap = h.get_cmap()
+    cmap.set_under('red')
+    h.set_cmap(cmap)
+    plt.title('Melt out day')
+
+    SED = SED.rio.write_crs("EPSG:4326")
+    SOD = SOD.rio.write_crs("EPSG:4326")
+
+    SED.rio.to_raster('out/SOD SED/'+area+'_SED.tif', compress='LZW')
+    SOD.rio.to_raster('out/SOD SED/'+area+'_SOD.tif', compress='LZW')
